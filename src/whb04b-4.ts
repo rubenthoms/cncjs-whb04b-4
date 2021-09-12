@@ -261,21 +261,16 @@ export class Whb04b_4 {
         this.displayEncode();
     }
 
-    protected encodeFloat(v: number) {
+    protected dec2bin(v: number, numBits: number = 16) {
+        const bin = (v >>> 0).toString(2);
+        return bin.substring(bin.length - numBits - 1, bin.length - 1);
+    }
+
+    protected encodeFloat(v: number): number[] {
         const intV = Math.round(Math.abs(v) * 10000.0);
-        const intPart = intV / 10000;
-        let fractPart = intV % 10000;
-        if (v < 0) {
-            fractPart = fractPart | 0x8000;
-        }
-        /*
-        return [
-            ((intPart << 16) >> 24) << 8,
-            (intPart << 24) >> 24,
-            ((fractPart << 16) >> 24) << 8,
-            (fractPart << 16) >> 16,
-        ];
-        */
+        const intPart = ((intV / 10000) << 16) >> 16;
+        let fractPart = (intV % 10000 << 16) >> 16;
+        if (v < 0) fractPart = fractPart | 0x8000;
         return [Math.floor(intPart), fractPart];
     }
 
@@ -290,36 +285,40 @@ export class Whb04b_4 {
 
         const buffer = Buffer.alloc(6 * 7, 0);
         const data = Buffer.alloc(6 * 8, 0);
+
         let i = 0;
         buffer[i++] = 0xfe;
         buffer[i++] = 0xfd;
         buffer[i++] = 0x0c;
+        i++;
         let encoded = this.encodeFloat(Math.round(1000 * parseFloat(this.grblState.status.wpos.x)) / 1000);
-        buffer.writeInt16BE(encoded[0], i);
-        buffer.writeInt16BE(encoded[1], (i += 2));
+        buffer.writeUInt16LE(encoded[0], i);
+        buffer.writeUInt16LE(encoded[1], (i += 2));
         encoded = this.encodeFloat(Math.round(1000 * parseFloat(this.grblState.status.wpos.y)) / 1000);
-        buffer.writeInt16BE(encoded[0], (i += 2));
-        buffer.writeInt16BE(encoded[1], (i += 2));
+        buffer.writeUInt16LE(encoded[0], (i += 2));
+        buffer.writeUInt16LE(encoded[1], (i += 2));
         encoded = this.encodeFloat(Math.round(1000 * parseFloat(this.grblState.status.wpos.z)) / 1000);
-        buffer.writeInt16BE(encoded[0], (i += 2));
-        buffer.writeInt16BE(encoded[1], (i += 2));
+        buffer.writeUInt16LE(encoded[0], (i += 2));
+        buffer.writeUInt16LE(encoded[1], (i += 2));
         encoded = this.encodeFloat(Math.round(1000 * parseFloat(this.grblState.status.mpos.x)) / 1000);
-        buffer.writeInt16BE(encoded[0], (i += 2));
-        buffer.writeInt16BE(encoded[1], (i += 2));
+        buffer.writeUInt16LE(encoded[0], (i += 2));
+        buffer.writeUInt16LE(encoded[1], (i += 2));
         encoded = this.encodeFloat(Math.round(1000 * parseFloat(this.grblState.status.mpos.y)) / 1000);
-        buffer.writeInt16BE(encoded[0], (i += 2));
-        buffer.writeInt16BE(encoded[1], (i += 2));
+        buffer.writeUInt16LE(encoded[0], (i += 2));
+        buffer.writeUInt16LE(encoded[1], (i += 2));
         encoded = this.encodeFloat(Math.round(1000 * parseFloat(this.grblState.status.mpos.z)) / 1000);
-        buffer.writeInt16BE(encoded[0], (i += 2));
-        buffer.writeInt16BE(encoded[1], (i += 2));
+        buffer.writeUInt16LE(encoded[0], (i += 2));
+        buffer.writeUInt16LE(encoded[1], (i += 2));
 
-        buffer.writeInt16BE(this.encodeS16(this.controllerState.feedRate), (i += 2));
-        buffer.writeInt16BE(this.encodeS16(this.controllerState.spindle), (i += 2));
-        buffer.writeInt16BE(this.encodeS16(this.grblState.status.feedrate), (i += 2));
-        buffer.writeInt16BE(this.encodeS16(this.grblState.status.spindle), (i += 2));
+        buffer.writeUInt16LE(this.encodeS16(this.controllerState.feedRate), (i += 2));
+        buffer.writeUInt16LE(this.encodeS16(this.controllerState.spindle), (i += 2));
+        buffer.writeUInt16LE(this.encodeS16(this.grblState.status.feedrate), (i += 2));
+        buffer.writeUInt16LE(this.encodeS16(this.grblState.status.spindle), (i += 2));
 
         buffer[i++] = 0x00;
         buffer[36] = 0;
+
+        console.log(buffer);
 
         i = 0;
         for (let packageIndex = 0; packageIndex < 6; packageIndex++) {
@@ -404,3 +403,4 @@ export class Whb04b_4 {
 module.exports = {
     Whb04b_4,
 };
+
