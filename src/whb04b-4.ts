@@ -425,6 +425,7 @@ export class Whb04b_4 {
         buffer[i] = 0x0;
 
         this.setBit(buffer, i, 0, this.controllerState.jogMode === JogMode.CONTINUOUS ? 0 : 1);
+        this.setBit(buffer, i, 6, this.grblState.status.activeState === "Alarm" ? 1 : 0);
         this.setBit(buffer, i, 7, this.controllerState.coordinateSystem === CoordinateSystem.workCoordinates ? 1 : 0);
         i++;
         let encoded = [0, 0];
@@ -449,9 +450,8 @@ export class Whb04b_4 {
             buffer.writeUInt16LE(encoded[0], (i += 2));
             buffer.writeUInt16LE(encoded[1], (i += 2));
         }
-        i++;
-        buffer.writeUInt16LE(this.controllerState.feedRate, (i += 2));
-        buffer.writeUInt16LE(this.controllerState.spindle, (i += 2));
+        buffer.writeUInt16LE(5000, 16);
+        buffer.writeUInt16LE(5000, 18);
         buffer[i++] = 0x00;
         buffer[36] = 0;
 
