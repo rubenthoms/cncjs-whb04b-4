@@ -67,6 +67,7 @@ enum CncState {
     IDLE = 0,
     RUN,
     HOLD,
+    ALARM
 }
 
 type Position = {
@@ -377,6 +378,8 @@ export class Whb04b_4 {
             this.controllerState.machineState = CncState.HOLD;
         } else if (state.status.activeState === "Idle") {
             this.controllerState.machineState = CncState.IDLE;
+        } else if (state.status.activeState === "Alarm") {
+            this.controllerState.machineState = CncState.ALARM;
         }
         this.displayEncode();
     }
@@ -425,7 +428,7 @@ export class Whb04b_4 {
         buffer[i] = 0x0;
 
         this.setBit(buffer, i, 0, this.controllerState.jogMode === JogMode.CONTINUOUS ? 0 : 1);
-        this.setBit(buffer, i, 6, this.grblState.status.activeState === "Alarm" ? 1 : 0);
+        this.setBit(buffer, i, 6, this.controllerState.machineState === CncState.ALARM ? 1 : 0);
         this.setBit(buffer, i, 7, this.controllerState.coordinateSystem === CoordinateSystem.workCoordinates ? 1 : 0);
         i++;
         let encoded = [0, 0];
