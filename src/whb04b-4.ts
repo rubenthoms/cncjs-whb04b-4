@@ -2,6 +2,8 @@
 
 import usb from "usb";
 import ioClient from "socket.io-client";
+import fs from "fs";
+import os from "os";
 
 export enum Axis {
     OFF = 6,
@@ -126,6 +128,12 @@ enum Distance {
 
 const MAX_SPINDLE_SPEED = 25000; //rpm
 const MIN_SPINDLE_SPEED = 5000; //rpm
+const PROBE_DEPTH = 10; // mm
+const TOUCH_PLATE_THICKNESS = 24.2; // mm
+const PROBE_FEEDRATE = 20; //mm/min
+const RETRACTION_DISTANCE = 4; // mm
+
+const PATH_TO_CNC_RC = os.homedir() + "/.cncrc";
 
 export class Whb04b_4 {
     private static vendorId = 4302;
@@ -158,6 +166,8 @@ export class Whb04b_4 {
     protected port: string;
     protected grblState: GrblState;
     protected grblSettings: GrblSettings;
+    protected macros: string[];
+    protected cncRcLastModifiedMs: number;
 
     protected controllerState: ControllerState;
     protected connected: boolean;
@@ -206,6 +216,11 @@ export class Whb04b_4 {
             version: "unknown",
         };
 
+        this.macros = [];
+        this.cncRcLastModifiedMs = 0;
+        this.maybeReadCncRcFile();
+        setInterval(this.maybeReadCncRcFile, 5000);
+
         socket.on("Grbl:state", (state: GrblState) => {
             this.handleGrblData(state);
         });
@@ -246,6 +261,31 @@ export class Whb04b_4 {
         usb.on("attach", (device: usb.Device) => this.handleAttachedUsbDevice(device));
         usb.on("detach", (device: usb.Device) => this.handleDetachedUsbDevice(device));
         this.connectController();
+    }
+
+    protected maybeReadCncRcFile(): void {
+        fs.open(PATH_TO_CNC_RC, "r", (err, _) => {
+            if (err) {
+                console.log(err);
+                return;
+            }
+
+            fs.stat(PATH_TO_CNC_RC, (_, data) => {
+                if (data.mtimeMs > this.cncRcLastModifiedMs) {
+                    this.macros = [];
+                    const rawData = fs.readFileSync(PATH_TO_CNC_RC, "utf-8");
+                    const jsonData = JSON.parse(rawData);
+                    if ("macros" in jsonData && Array.isArray(jsonData["macros"])) {
+                        jsonData["macros"].forEach((macro) => {
+                            if ("id" in macro) {
+                                this.macros.push(macro["id"]);
+                            }
+                        });
+                    }
+                    this.cncRcLastModifiedMs = data.mtimeMs;
+                }
+            });
+        });
     }
 
     protected handleAttachedUsbDevice(device: usb.Device): void {
@@ -307,6 +347,7 @@ export class Whb04b_4 {
 
         console.log("Controller connected!");
         this.connected = true;
+        setTimeout(this.displayEncode, 1000);
     }
 
     protected disconnectController(): void {
@@ -473,7 +514,20 @@ export class Whb04b_4 {
                         }
                         break;
                     case Whb04b_4.buttonCodes.workingAreaHome:
-                        this.sendGCode(`G28`);
+                        if (this.controllerState.coordinateSystem === CoordinateSystem.machineCoordinates) {
+                            this.sendGCode(`G54 G90 G0 X0 Y0 Z0`);
+                        } else {
+                            this.sendGCode(`G54 G90 G0 X0 Y0 Z0`);
+                        }
+                        break;
+                    case Whb04b_4.buttonCodes.probeZ:
+                        this.sendGCode(`G91`);
+                        this.sendGCode(`G38.2 Z-${PROBE_DEPTH} F${PROBE_FEEDRATE}`);
+                        this.sendGCode(`G90`);
+                        this.sendGCode(`G10 L20 P1 Z${TOUCH_PLATE_THICKNESS}`);
+                        this.sendGCode(`G91`);
+                        this.sendGCode(`G0 Z${RETRACTION_DISTANCE}`);
+                        this.sendGCode(`G90`);
                         break;
                     case Whb04b_4.buttonCodes.spindlePlus:
                         this.controllerState.spindle = Math.min(this.controllerState.spindle + 500, MAX_SPINDLE_SPEED);
@@ -507,6 +561,33 @@ export class Whb04b_4 {
                 switch (fnButtonCode) {
                     case Whb04b_4.buttonCodes.reset:
                         this.sendCommand("unlock");
+                        break;
+                    case Whb04b_4.buttonCodes.feedPlus:
+                        this.runMacro(0);
+                        break;
+                    case Whb04b_4.buttonCodes.feedMinus:
+                        this.runMacro(1);
+                        break;
+                    case Whb04b_4.buttonCodes.spindlePlus:
+                        this.runMacro(2);
+                        break;
+                    case Whb04b_4.buttonCodes.spindleMinus:
+                        this.runMacro(3);
+                        break;
+                    case Whb04b_4.buttonCodes.machineHome:
+                        this.runMacro(4);
+                        break;
+                    case Whb04b_4.buttonCodes.safeZ:
+                        this.runMacro(5);
+                        break;
+                    case Whb04b_4.buttonCodes.workingAreaHome:
+                        this.runMacro(6);
+                        break;
+                    case Whb04b_4.buttonCodes.spindleOnOff:
+                        this.runMacro(7);
+                        break;
+                    case Whb04b_4.buttonCodes.probeZ:
+                        this.runMacro(8);
                         break;
                 }
             }
@@ -607,13 +688,20 @@ export class Whb04b_4 {
         this.lastTimestamp = newTimestamp;
     }
 
+    protected runMacro(macroIndex: number) {
+        if (macroIndex >= 0 && macroIndex < this.macros.length) {
+            const macroId = this.macros[macroIndex];
+            this.socket.emit("command", this.port, "macro:load", macroId);
+            this.socket.emit("command", this.port, "macro:run", macroId);
+        }
+    }
+
     protected sendCommand(command: string) {
         this.socket.emit("command", this.port, command);
     }
 
     protected sendGCode(code: string) {
-        this.commandBuffer.push({ type: CommandType.Other, code: code });
-        this.processCommandBuffer();
+        this.socket.emit("write", this.port, code + "\n");
     }
 
     protected sendPositionGCode(code: string) {
@@ -636,8 +724,8 @@ export class Whb04b_4 {
                 this.controllerState.distance = Distance.Absolute;
                 this.commandBuffer.unshift({ type: CommandType.Other, code: "G90" });
             }
-            this.socket.emit("write", this.port, this.commandBuffer[0].code + "\n");
             this.commandExecuted = false;
+            this.socket.emit("write", this.port, this.commandBuffer[0].code + "\n");
             this.commandBuffer = this.commandBuffer.slice(1, this.commandBuffer.length);
         } else if (
             this.commandBuffer.length === 0 &&
